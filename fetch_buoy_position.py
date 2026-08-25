@@ -812,7 +812,8 @@ def main() -> None:
         print(f"Wrote {pages_path} (for GitHub Pages)")
 
     print(f"Wrote {output_path}")
-    webbrowser.open(f"file://{output_path}")
+    if not os.environ.get("CI"):
+        webbrowser.open(f"file://{output_path}")
 
 
 if __name__ == "__main__":
