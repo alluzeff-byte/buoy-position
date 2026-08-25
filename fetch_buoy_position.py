@@ -38,10 +38,12 @@ def blob_url(blob_name: str) -> str:
 
 
 # --- Locations -----------------------------------------------------------
-# "anchor" is the mooring's fixed anchor position + excursion radius, used to
-# draw the anchor marker/circle and to filter out GPS glitches outside the
-# tether's reach. Set to None for locations with no known anchor geometry -
-# the plot then shows just the trajectory and latest-position marker.
+# "anchor" is the mooring's fixed anchor position + excursion radius, drawn
+# as a marker/circle for reference - purely visual, it does not filter what
+# gets plotted, so a buoy currently outside its circle still shows up (worth
+# noticing, not worth hiding). Set to None for locations with no known
+# anchor geometry - the plot then shows just the trajectory and
+# latest-position marker.
 LOCATIONS = [
     {
         "key": "pierce",
@@ -453,55 +455,6 @@ def vincenty_direct(lat_deg: float, lon_deg: float, bearing_deg: float, distance
     return math.degrees(lat2), math.degrees(lon2)
 
 
-def vincenty_distance_m(lat1_deg: float, lon1_deg: float, lat2_deg, lon2_deg):
-    """Ellipsoidal geodesic distance (m) between (lat1_deg, lon1_deg) and each point in
-    (lat2_deg, lon2_deg) on the WGS84 ellipsoid (Vincenty inverse formula). Vectorized;
-    lat2_deg/lon2_deg may be arrays."""
-    a, f, b = WGS84_A, WGS84_F, WGS84_B
-    lat1 = np.radians(lat1_deg)
-    lat2 = np.radians(np.asarray(lat2_deg, dtype=float))
-    big_l = np.radians(np.asarray(lon2_deg, dtype=float) - lon1_deg)
-
-    tan_u1 = (1 - f) * np.tan(lat1)
-    cos_u1 = 1 / np.sqrt(1 + tan_u1**2)
-    sin_u1 = tan_u1 * cos_u1
-    tan_u2 = (1 - f) * np.tan(lat2)
-    cos_u2 = 1 / np.sqrt(1 + tan_u2**2)
-    sin_u2 = tan_u2 * cos_u2
-
-    lam = big_l
-    for _ in range(20):
-        sin_lambda, cos_lambda = np.sin(lam), np.cos(lam)
-        sin_sigma = np.sqrt(
-            (cos_u2 * sin_lambda) ** 2 + (cos_u1 * sin_u2 - sin_u1 * cos_u2 * cos_lambda) ** 2
-        )
-        sin_sigma_safe = np.where(sin_sigma == 0, 1e-30, sin_sigma)
-        cos_sigma = sin_u1 * sin_u2 + cos_u1 * cos_u2 * cos_lambda
-        sigma = np.arctan2(sin_sigma, cos_sigma)
-        sin_alpha = cos_u1 * cos_u2 * sin_lambda / sin_sigma_safe
-        cos_sq_alpha = 1 - sin_alpha**2
-        cos_sq_alpha_safe = np.where(cos_sq_alpha == 0, 1e-30, cos_sq_alpha)
-        cos2_sigma_m = cos_sigma - 2 * sin_u1 * sin_u2 / cos_sq_alpha_safe
-        cap_c = f / 16 * cos_sq_alpha * (4 + f * (4 - 3 * cos_sq_alpha))
-        lam = big_l + (1 - cap_c) * f * sin_alpha * (
-            sigma + cap_c * sin_sigma * (cos2_sigma_m + cap_c * cos_sigma * (-1 + 2 * cos2_sigma_m**2))
-        )
-
-    u_sq = cos_sq_alpha * (a**2 - b**2) / b**2
-    cap_a = 1 + u_sq / 16384 * (4096 + u_sq * (-768 + u_sq * (320 - 175 * u_sq)))
-    cap_b = u_sq / 1024 * (256 + u_sq * (-128 + u_sq * (74 - 47 * u_sq)))
-    delta_sigma = cap_b * sin_sigma * (
-        cos2_sigma_m
-        + cap_b
-        / 4
-        * (
-            cos_sigma * (-1 + 2 * cos2_sigma_m**2)
-            - cap_b / 6 * cos2_sigma_m * (-3 + 4 * sin_sigma**2) * (-3 + 4 * cos2_sigma_m**2)
-        )
-    )
-    return b * cap_a * (sigma - delta_sigma)
-
-
 def format_anchor_position(lat_deg: float, lon_deg: float) -> str:
     lat_dir = "N" if lat_deg >= 0 else "S"
     lon_dir = "E" if lon_deg >= 0 else "W"
@@ -510,7 +463,10 @@ def format_anchor_position(lat_deg: float, lon_deg: float) -> str:
 
 def fetch_positions(location: dict) -> tuple[pd.DataFrame, datetime]:
     """Download the location's CSV from Azure Blob Storage and return its
-    lat/lon history, filtered to the mooring's excursion circle if known."""
+    full lat/lon history - including points outside the mooring's excursion
+    circle, since a real reading out there (dragging anchor, mismeasured
+    tether length) is exactly the kind of thing this page should surface,
+    not silently hide."""
     now = datetime.now(timezone.utc)
     resp = requests.get(blob_url(location["blob_name"]), timeout=30)
     if not resp.ok:
@@ -521,16 +477,6 @@ def fetch_positions(location: dict) -> tuple[pd.DataFrame, datetime]:
     positions = positions.sort_values("timestamp")
     if positions.empty:
         raise RuntimeError(f"No position data found in {location['blob_name']}.")
-
-    anchor = location["anchor"]
-    if anchor is not None:
-        # Drop samples outside the mooring's excursion circle (GPS glitches) - the
-        # buoy physically cannot move further than its tether allows. Distance is
-        # the ellipsoidal geodesic (Vincenty, WGS84), not a flat/spherical approximation.
-        positions["distance_m"] = vincenty_distance_m(anchor["lat"], anchor["lon"], positions["lat"], positions["lon"])
-        positions = positions[positions["distance_m"] <= anchor["radius_m"]]
-        if positions.empty:
-            raise RuntimeError(f"No samples found inside the excursion circle for {location['label']}.")
 
     return positions, now
 
@@ -638,14 +584,27 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
                 hoverinfo="skip",
             )
         )
-        # Crop the view tightly to the excursion circle, and lock a square canvas
-        # so there's no empty space beyond the circle.
-        lon_span = circle_lon.max() - circle_lon.min()
-        lat_span = circle_lat.max() - circle_lat.min()
-        pad = 0.03
-        lon_range = [circle_lon.min() - pad * lon_span, circle_lon.max() + pad * lon_span]
-        lat_range = [circle_lat.min() - pad * lat_span, circle_lat.max() + pad * lat_span]
-        scaleratio = lon_span / lat_span
+        # Frame the excursion circle plus whatever's actually plotted - a
+        # buoy currently outside its circle should stay visible, not get
+        # cropped out of view. scaleratio comes from the circle's own true
+        # geodesic proportions (the meridian-convergence correction for this
+        # latitude), not the combined extent, so the circle still renders as
+        # a true circle; Plotly only ever widens a range to satisfy it, so
+        # this can't clip data even if the union box is lopsided.
+        circle_lon_span = circle_lon.max() - circle_lon.min()
+        circle_lat_span = circle_lat.max() - circle_lat.min()
+        scaleratio = circle_lon_span / circle_lat_span
+
+        all_lon = default_window["x"] + [latest["lon"], anchor["lon"]]
+        all_lat = default_window["y"] + [latest["lat"], anchor["lat"]]
+        lon_min = min(circle_lon.min(), min(all_lon))
+        lon_max = max(circle_lon.max(), max(all_lon))
+        lat_min = min(circle_lat.min(), min(all_lat))
+        lat_max = max(circle_lat.max(), max(all_lat))
+        pad_lon = 0.05 * circle_lon_span
+        pad_lat = 0.05 * circle_lat_span
+        lon_range = [lon_min - pad_lon, lon_max + pad_lon]
+        lat_range = [lat_min - pad_lat, lat_max + pad_lat]
     else:
         # No anchor geometry known - just frame the trajectory + latest point.
         all_lon = default_window["x"] + [latest["lon"]]
