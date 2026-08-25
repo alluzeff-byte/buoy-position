@@ -775,16 +775,18 @@ def main() -> None:
         f.write(html)
 
     # Also publish into docs/ - GitHub Pages serves this repo's site from
-    # there (docs/index.html), so the page stays reachable online after a
-    # `git add docs && git commit && git push`.
+    # there, so the page stays reachable online after a
+    # `git add docs && git commit && git push`. Two copies: index.html for
+    # the bare repo URL, buoys.html for the explicit link people share.
     docs_dir = os.path.join(script_dir, "docs")
     os.makedirs(docs_dir, exist_ok=True)
-    pages_path = os.path.join(docs_dir, "index.html")
-    with open(pages_path, "w", encoding="utf-8") as f:
-        f.write(html)
+    for pages_name in ("index.html", "buoys.html"):
+        pages_path = os.path.join(docs_dir, pages_name)
+        with open(pages_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"Wrote {pages_path} (for GitHub Pages)")
 
     print(f"Wrote {output_path}")
-    print(f"Wrote {pages_path} (for GitHub Pages)")
     webbrowser.open(f"file://{output_path}")
 
 
