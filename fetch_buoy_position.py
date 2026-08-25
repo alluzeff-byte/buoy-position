@@ -10,6 +10,7 @@ import io
 import json
 import math
 import os
+import urllib.parse
 import webbrowser
 from datetime import datetime, timedelta, timezone
 
@@ -94,6 +95,28 @@ WINDOW_LABELS = [label for label, _ in WINDOW_OPTIONS]
 # the window dropdown's restyle buttons.
 TRAJECTORY_TRACE_INDEX = 0
 
+# --- Favicon: stylized oceanographic buoy (yellow sphere, black instrument
+# band, whip antenna) - a real yellow spherical mooring buoy like the ones
+# this page tracks. Inline SVG data URI so no separate asset file is needed.
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="g" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#fff67a"/>
+      <stop offset="55%" stop-color="#ffd400"/>
+      <stop offset="100%" stop-color="#e2a600"/>
+    </radialGradient>
+    <clipPath id="c"><circle cx="32" cy="36" r="24"/></clipPath>
+  </defs>
+  <circle cx="32" cy="36" r="24" fill="url(#g)"/>
+  <g clip-path="url(#c)">
+    <ellipse cx="32" cy="20" rx="26" ry="9" fill="#1a1a1a"/>
+  </g>
+  <circle cx="32" cy="36" r="24" fill="none" stroke="#c98f00" stroke-width="1"/>
+  <line x1="32" y1="16" x2="32" y2="3" stroke="#cfd8dc" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="32" cy="3" r="2.2" fill="#9aa5ab"/>
+</svg>"""
+FAVICON_DATA_URI = "data:image/svg+xml," + urllib.parse.quote(FAVICON_SVG)
+
 # --- Figure sizing -----------------------------------------------------
 FIGURE_WIDTH = 1075
 FIGURE_HEIGHT = 750
@@ -103,6 +126,7 @@ PAGE_TEMPLATE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <title>{title}</title>
+<link rel="icon" type="image/svg+xml" href="{favicon_data_uri}">
 <style>
   :root {{
     --bg: #eef1ea;
@@ -753,6 +777,7 @@ def render_page(datasets: dict) -> str:
 
     return PAGE_TEMPLATE.format(
         title="Buoy position",
+        favicon_data_uri=FAVICON_DATA_URI,
         initial_title=f'{LOCATIONS[0]["label"]} buoy position',
         tab_buttons="\n      ".join(tab_buttons),
         tab_panels="\n    ".join(tab_panels),
