@@ -1,0 +1,5 @@
+truststore
+numpy
+pandas
+plotly
+requests

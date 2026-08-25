@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+
+# Local-dev secrets for the Azure Function (real values live in Function App
+# settings in Azure, not here).
+azure-function/local.settings.json
+
+# Local preview copy - the published copy lives in docs/index.html.
+/buoy_position.html
+
+# Local CSV snapshots from manual runs of fetch_buoy_positions_csv.py - the
+# source of truth is the Azure Blob container, not these.
+/Pierce_buoy_position.csv
+/Penguins_buoy_position.csv
+/Penguins(sat)_buoy_position.csv
