@@ -49,19 +49,19 @@ LOCATIONS = [
         "key": "pierce",
         "label": "Pierce",
         "blob_name": "Pierce_buoy_position.csv",
-        "anchor": {"lat": 57.1561, "lon": 2.2691, "radius_m": 165.0},
+        "anchor": {"lat": 57.1561, "lon": 2.2691, "radius_m": 130.0},
     },
     {
         "key": "penguins",
         "label": "Penguins",
         "blob_name": "Penguins_buoy_position.csv",
-        "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 315.0},
+        "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 330.0},
     },
     {
         "key": "penguins-sat",
         "label": "Penguins(sat)",
         "blob_name": "Penguins(sat)_buoy_position.csv",
-        "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 315.0},
+        "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 330.0},
     },
 ]
 
@@ -504,6 +504,7 @@ def build_dataset(positions: pd.DataFrame, now: datetime) -> dict:
             "lon": float(latest["lon"]),
             "lat": float(latest["lat"]),
             "name": f"Latest buoy position ({format_anchor_position(latest['lat'], latest['lon'])})",
+            "time_label": latest["timestamp"].strftime("%Y-%m-%d %H:%M:%S UTC"),
         },
         # ISO timestamp of the newest data point (not "when this page was
         # generated") - the browser converts it to the viewer's local time.
@@ -550,7 +551,12 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
             marker=dict(symbol="triangle-up", size=LATEST_MARKER_SIZE, color=LATEST_COLOR),
             name=latest["name"],
             legendgroup="latest",
-            hovertemplate=("Latitude: %{y:.6f}<br>Longitude: %{x:.6f}<extra></extra>"),
+            customdata=[latest["time_label"]],
+            hovertemplate=(
+                "Time: %{customdata}<br>"
+                "Latitude: %{y:.6f}<br>"
+                "Longitude: %{x:.6f}<extra></extra>"
+            ),
         )
     )
 
