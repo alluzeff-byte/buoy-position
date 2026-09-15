@@ -133,24 +133,49 @@ def get_start_time(existing: pd.DataFrame) -> datetime:
 
 def update_location(
     session: requests.Session, container: ContainerClient, location: dict, now: datetime
-) -> str:
+) -> tuple[str, bool]:
     name = location["name"]
     existing = read_existing(container, location["blob_name"])
     start = get_start_time(existing)
 
     grid = build_grid(start, now)
     if len(grid) == 0:
-        return f"{name}: already up to date."
+        return f"{name}: already up to date.", False
 
     raw_positions = fetch_new_positions(session, location["lat_channel"], location["lon_channel"], start, now)
     new_positions = align_to_grid(raw_positions, grid)
 
     if new_positions.empty:
-        return f"{name}: no new data since the last recorded position."
+        return f"{name}: no new data since the last recorded position.", False
 
     combined = pd.concat([existing, new_positions], ignore_index=True)
     write_csv(container, location["blob_name"], combined)
-    return f"{name}: added {len(new_positions)} new position(s) to blob {location['blob_name']}"
+    return f"{name}: added {len(new_positions)} new position(s) to blob {location['blob_name']}", True
+
+
+def trigger_github_refresh() -> None:
+    """Ask the buoy-position GitHub repo to rerun its "Refresh buoy position
+    page" Action right now, instead of waiting for GitHub's own `schedule`
+    trigger - which has been observed to silently skip firing for hours at
+    a time under platform load. This timer trigger is the reliable clock;
+    GitHub's cron is not."""
+    token = os.environ.get("GITHUB_DISPATCH_TOKEN")
+    repo = os.environ.get("GITHUB_REPO")
+    if not token or not repo:
+        logging.warning("GITHUB_DISPATCH_TOKEN/GITHUB_REPO not set - skipping GitHub Pages refresh trigger.")
+        return
+
+    url = f"https://api.github.com/repos/{repo}/actions/workflows/refresh.yml/dispatches"
+    resp = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+        json={"ref": "master"},
+        timeout=30,
+    )
+    if resp.ok:
+        logging.info("Triggered GitHub Action to refresh the published page.")
+    else:
+        logging.warning(f"Failed to trigger GitHub Action ({resp.status_code}): {resp.text}")
 
 
 def update_all() -> None:
@@ -161,5 +186,11 @@ def update_all() -> None:
     session = login(username, password)
     container = get_container_client()
 
+    any_changed = False
     for location in LOCATIONS:
-        logging.info(update_location(session, container, location, now))
+        message, changed = update_location(session, container, location, now)
+        logging.info(message)
+        any_changed = any_changed or changed
+
+    if any_changed:
+        trigger_github_refresh()
