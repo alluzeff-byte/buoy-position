@@ -269,7 +269,7 @@ PAGE_TEMPLATE = """<!doctype html>
   }}
   .site-footer {{
     margin-top: 16px;
-    text-align: center;
+    text-align: left;
     font-size: 12px;
     color: var(--muted);
   }}
