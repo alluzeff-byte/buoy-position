@@ -23,6 +23,13 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 
+from elements_api import fetch_channel, login
+
+# --- Elements Online (wave conditions only - position data comes from Blob
+# Storage, see below) ------------------------------------------------------
+ELEMENTS_USERNAME = os.environ.get("ELEMENTS_USERNAME")
+ELEMENTS_PASSWORD = os.environ.get("ELEMENTS_PASSWORD")
+
 # --- Azure Blob Storage -------------------------------------------------
 # Read-only, container-scoped SAS token (expires 2027-08-25). Least-privilege
 # on purpose: it can only read blobs in the "buoy-data" container, nothing
@@ -44,23 +51,33 @@ def blob_url(blob_name: str) -> str:
 # noticing, not worth hiding). Set to None for locations with no known
 # anchor geometry - the plot then shows just the trajectory and
 # latest-position marker.
+# "wave_channels" (optional) are Elements Online channel IDs for live wave
+# conditions, fetched fresh at page-generation time (unlike position, these
+# aren't piped through Blob Storage) and shown as Hs/Tp fields above the
+# "Data as of" caption. Omit or set to None where not available.
 LOCATIONS = [
     {
         "key": "pierce",
         "label": "Pierce",
         "blob_name": "Pierce_buoy_position.csv",
         "anchor": {"lat": 57.1561, "lon": 2.2691, "radius_m": 130.0},
+        "wave_channels": {
+            "hs": "2bdb5270-887f-11eb-9d91-cf7c0f6efbea",
+            "tp": "2baca150-887f-11eb-9d91-cf7c0f6efbea",
+        },
     },
     {
         "key": "penguins",
         "label": "Penguins",
         "blob_name": "Penguins_buoy_position.csv",
         "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 330.0},
+        "wave_channels": None,
     },
     {
         "key": "penguins-sat",
         "label": "Penguins(sat)",
         "blob_name": "Penguins(sat)_buoy_position.csv",
+        "wave_channels": None,
         "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 330.0},
     },
 ]
@@ -216,6 +233,16 @@ PAGE_TEMPLATE = """<!doctype html>
   }}
   .last-updated {{
     font-size: 12px;
+    color: var(--muted);
+  }}
+  .wave-conditions {{
+    margin-bottom: 4px;
+  }}
+  .wave-field {{
+    font-size: 12px;
+    color: var(--text);
+  }}
+  .wave-field .wave-label {{
     color: var(--muted);
   }}
   .window-controls {{
@@ -481,6 +508,21 @@ def fetch_positions(location: dict) -> tuple[pd.DataFrame, datetime]:
     return positions, now
 
 
+def fetch_latest_waves(session: requests.Session, wave_channels: dict) -> dict:
+    """Fetch the most recent Hs/Tp reading directly from Elements Online -
+    unlike position data, this isn't piped through Blob Storage, so it's
+    fetched fresh each time the page is generated."""
+    now = datetime.now(timezone.utc)
+    ts_1 = int((now - timedelta(hours=6)).timestamp() * 1000)
+    ts_2 = int(now.timestamp() * 1000)
+
+    values = {}
+    for field, channel_id in wave_channels.items():
+        df = fetch_channel(channel_id, session, ts_1, ts_2)
+        values[field] = float(df.iloc[-1]["value"]) if not df.empty else None
+    return values
+
+
 def build_dataset(positions: pd.DataFrame, now: datetime) -> dict:
     """Everything a location's page section needs that can change on an
     "Update" refresh: the trajectory for each dropdown window, and the
@@ -698,6 +740,18 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
         for label in WINDOW_LABELS
     )
 
+    wave_html = ""
+    waves = dataset.get("waves")
+    if waves:
+        def fmt_wave(value, suffix, decimals):
+            return f"{value:.{decimals}f} {suffix}" if value is not None else "N/A"
+
+        wave_html = f"""
+        <div class="wave-conditions">
+          <div class="wave-field"><span class="wave-label">Hs:</span> {fmt_wave(waves.get('hs'), 'm', 2)}</div>
+          <div class="wave-field"><span class="wave-label">Tp:</span> {fmt_wave(waves.get('tp'), 's', 1)}</div>
+        </div>"""
+
     return f"""
     <div class="card">
       <div class="chart">
@@ -715,7 +769,7 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
             {options_html}
           </select>
         </div>
-        <div class="side-controls">
+        <div class="side-controls">{wave_html}
           <div class="last-updated" data-timestamp="{dataset['latest_timestamp']}">Data as of: {dataset['latest_timestamp']}</div>
         </div>
       </div>
@@ -753,10 +807,21 @@ def render_page(datasets: dict) -> str:
 
 
 def main() -> None:
+    elements_session = None
+    if any(location.get("wave_channels") for location in LOCATIONS):
+        if not ELEMENTS_USERNAME or not ELEMENTS_PASSWORD:
+            raise RuntimeError(
+                "ELEMENTS_USERNAME/ELEMENTS_PASSWORD must be set to fetch wave conditions (Hs/Tp)."
+            )
+        elements_session = login(ELEMENTS_USERNAME, ELEMENTS_PASSWORD)
+
     datasets = {}
     for location in LOCATIONS:
         positions, now = fetch_positions(location)
-        datasets[location["key"]] = build_dataset(positions, now)
+        dataset = build_dataset(positions, now)
+        if location.get("wave_channels"):
+            dataset["waves"] = fetch_latest_waves(elements_session, location["wave_channels"])
+        datasets[location["key"]] = dataset
     html = render_page(datasets)
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
