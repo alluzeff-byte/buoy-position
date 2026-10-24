@@ -291,6 +291,14 @@ PAGE_TEMPLATE = """<!doctype html>
   }}
   .pca-row {{
     position: absolute;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }}
+  .pca-stats {{
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
   }}
   .custom-range {{
     position: absolute;
@@ -330,6 +338,7 @@ PAGE_TEMPLATE = """<!doctype html>
     accent-color: var(--accent);
     cursor: pointer;
     flex-shrink: 0;
+    margin: 0;
   }}
   .window-select {{
     border: 1px solid var(--border);
@@ -497,7 +506,12 @@ PAGE_TEMPLATE = """<!doctype html>
     function computePcaAxis(key) {{
       var w = currentWindow(key);
       var n = w.x.length;
-      if (n < 2) return {{ x: [], y: [] }};
+      if (n < 2) {{
+        return {{
+          x: [], y: [], centroidX: null, centroidY: null,
+          bearing1: null, bearing2: null, variancePct: null,
+        }};
+      }}
 
       var lat0 = 0, lon0 = 0;
       for (var i = 0; i < n; i++) {{ lon0 += w.x[i]; lat0 += w.y[i]; }}
@@ -541,7 +555,36 @@ PAGE_TEMPLATE = """<!doctype html>
       var dLon = (vx * halfLen) / mPerDegLon;
       var dLat = (vy * halfLen) / mPerDegLat;
 
-      return {{ x: [lon0 - dLon, lon0 + dLon], y: [lat0 - dLat, lat0 + dLat] }};
+      var bearing1 = ((Math.atan2(vx, vy) * 180 / Math.PI) % 180 + 180) % 180;
+      var bearing2 = (bearing1 + 180) % 360;
+      var variancePct = trace > 1e-9 ? (lambda1 / trace * 100) : 0;
+
+      return {{
+        x: [lon0 - dLon, lon0 + dLon],
+        y: [lat0 - dLat, lat0 + dLat],
+        centroidX: lon0,
+        centroidY: lat0,
+        bearing1: bearing1,
+        bearing2: bearing2,
+        variancePct: variancePct,
+      }};
+    }}
+
+    function formatPcaStats(axis) {{
+      if (axis.bearing1 === null) return "";
+      return Math.round(axis.bearing1) + "°/" + Math.round(axis.bearing2) + "°, " + Math.round(axis.variancePct) + "%";
+    }}
+
+    function applyPcaDisplay(key) {{
+      var gd = document.getElementById("plot-" + key);
+      var checkbox = document.getElementById("pca-" + key);
+      var statsEl = document.getElementById("pca-stats-" + key);
+      var pcaIdx = parseInt(checkbox.dataset.pcaIndex, 10);
+      var centroidIdx = parseInt(checkbox.dataset.pcaCentroidIndex, 10);
+      var axis = computePcaAxis(key);
+      Plotly.restyle(gd, {{ x: [axis.x], y: [axis.y] }}, [pcaIdx]);
+      Plotly.restyle(gd, {{ x: [[axis.centroidX]], y: [[axis.centroidY]] }}, [centroidIdx]);
+      if (statsEl) statsEl.textContent = formatPcaStats(axis);
     }}
 
     // "Custom" has no precomputed window - it's filtered client-side from
@@ -591,9 +634,7 @@ PAGE_TEMPLATE = """<!doctype html>
 
       var pcaCheckbox = document.getElementById("pca-" + key);
       if (pcaCheckbox && pcaCheckbox.checked) {{
-        var pcaIdx = parseInt(pcaCheckbox.dataset.pcaIndex, 10);
-        var axis = computePcaAxis(key);
-        Plotly.restyle(gd, {{ x: [axis.x], y: [axis.y] }}, [pcaIdx]);
+        applyPcaDisplay(key);
       }}
     }}
 
@@ -680,11 +721,16 @@ PAGE_TEMPLATE = """<!doctype html>
         var key = checkbox.dataset.key;
         var gd = document.getElementById("plot-" + key);
         var pcaIdx = parseInt(checkbox.dataset.pcaIndex, 10);
+        var centroidIdx = parseInt(checkbox.dataset.pcaCentroidIndex, 10);
         if (checkbox.checked) {{
-          var axis = computePcaAxis(key);
-          Plotly.restyle(gd, {{ x: [axis.x], y: [axis.y], visible: true }}, [pcaIdx]);
+          applyPcaDisplay(key);
+          Plotly.restyle(gd, {{ visible: true }}, [pcaIdx]);
+          Plotly.restyle(gd, {{ visible: true }}, [centroidIdx]);
         }} else {{
           Plotly.restyle(gd, {{ visible: false }}, [pcaIdx]);
+          Plotly.restyle(gd, {{ visible: false }}, [centroidIdx]);
+          var statsEl = document.getElementById("pca-stats-" + key);
+          if (statsEl) statsEl.textContent = "";
         }}
       }});
     }});
@@ -752,15 +798,22 @@ def format_anchor_position(lat_deg: float, lon_deg: float) -> str:
     return f"{abs(lat_deg):.4f}{lat_dir}, {abs(lon_deg):.4f}{lon_dir}"
 
 
-def compute_pca_axis(lons: list, lats: list) -> tuple:
+def compute_pca_axis(lons: list, lats: list) -> dict:
     """Dominant axis of spatial spread (first principal component) for a set
-    of lon/lat points, as a 2-point line through the centroid spanning the
-    data's spread (+-2.2 std along the axis). Longitude is corrected for the
-    cos(latitude) distortion before computing covariance, so the axis
-    direction reflects true physical distance, not raw degrees. Mirrors the
-    client-side JS version used when the window selection changes."""
+    of lon/lat points: a 2-point line through the centroid spanning the
+    data's spread (+-2.2 std along the axis), the centroid itself, the
+    axis's bearing (as a 0-180 range line, e.g. 15/195 - a line has no
+    "direction", only an orientation), and the percentage of total variance
+    it explains. Longitude is corrected for the cos(latitude) distortion
+    before computing covariance, so the axis reflects true physical
+    distance, not raw degrees. Mirrors the client-side JS version used when
+    the window selection changes."""
+    empty = {
+        "line_x": [], "line_y": [], "centroid_lon": None, "centroid_lat": None,
+        "bearing1": None, "bearing2": None, "variance_pct": None,
+    }
     if len(lons) < 2:
-        return [], []
+        return empty
     lat0 = sum(lats) / len(lats)
     lon0 = sum(lons) / len(lons)
     m_per_deg_lat = 111320.0
@@ -785,7 +838,18 @@ def compute_pca_axis(lons: list, lats: list) -> tuple:
     half_len = 2.2 * std1
     d_lon = (vx * half_len) / m_per_deg_lon
     d_lat = (vy * half_len) / m_per_deg_lat
-    return [lon0 - d_lon, lon0 + d_lon], [lat0 - d_lat, lat0 + d_lat]
+    bearing1 = math.degrees(math.atan2(vx, vy)) % 180
+    bearing2 = (bearing1 + 180) % 360
+    variance_pct = (lambda1 / trace * 100) if trace > 1e-9 else 0.0
+    return {
+        "line_x": [lon0 - d_lon, lon0 + d_lon],
+        "line_y": [lat0 - d_lat, lat0 + d_lat],
+        "centroid_lon": lon0,
+        "centroid_lat": lat0,
+        "bearing1": bearing1,
+        "bearing2": bearing2,
+        "variance_pct": variance_pct,
+    }
 
 
 def fetch_positions(location: dict) -> tuple[pd.DataFrame, datetime]:
@@ -985,14 +1049,30 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
     # window (first principal component, through the centroid). Off by
     # default - toggled by the "PCA" checkbox.
     pca_trace_index = len(fig.data)
-    pca_x, pca_y = compute_pca_axis(default_window["x"], default_window["y"])
+    pca = compute_pca_axis(default_window["x"], default_window["y"])
     fig.add_trace(
         go.Scatter(
-            x=pca_x,
-            y=pca_y,
+            x=pca["line_x"],
+            y=pca["line_y"],
             mode="lines",
             line=dict(color="#e67e22", width=2, dash="dot"),
             name="PCA axis",
+            showlegend=False,
+            hoverinfo="skip",
+            visible=False,
+        )
+    )
+    pca_centroid_trace_index = len(fig.data)
+    centroid_xy = (
+        ([pca["centroid_lon"]], [pca["centroid_lat"]]) if pca["centroid_lon"] is not None else ([], [])
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=centroid_xy[0],
+            y=centroid_xy[1],
+            mode="markers",
+            marker=dict(symbol="x", size=10, color="#e67e22", line=dict(width=2)),
+            name="PCA centroid",
             showlegend=False,
             hoverinfo="skip",
             visible=False,
@@ -1095,9 +1175,10 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
         </div>
         <div class="pca-row">
           <label class="toggle-label">
-            <input type="checkbox" id="pca-{key}" data-key="{key}" data-pca-index="{pca_trace_index}">
+            <input type="checkbox" id="pca-{key}" data-key="{key}" data-pca-index="{pca_trace_index}" data-pca-centroid-index="{pca_centroid_trace_index}">
             PCA
           </label>
+          <span class="pca-stats" id="pca-stats-{key}"></span>
         </div>
         <div class="custom-range" id="custom-range-{key}" hidden>
           <label class="custom-range-field">Start <input type="datetime-local" id="custom-start-{key}" data-key="{key}"></label>
