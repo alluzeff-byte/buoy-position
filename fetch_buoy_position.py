@@ -87,7 +87,7 @@ LOCATIONS = [
         "key": "penguins",
         "label": "Penguins",
         "blob_name": "Penguins_buoy_position.csv",
-        "anchor": {"lat": 61.5769, "lon": 1.5259, "radius_m": 329.0},
+        "anchor": {"lat": 61.5769, "lon": 1.5259, "radius_m": 330.0},
         "wave_channels": {
             "hs": "91fb2f30-9c75-11f0-8f61-ffb240084fa4",
             "tp": "909adbe0-9c75-11f0-8f61-ffb240084fa4",
@@ -110,7 +110,7 @@ LOCATIONS = [
             "cs": "3b6c8e80-f7a5-11f0-bd98-21743c6b84e7",
             "cd": "3b60f5c0-f7a5-11f0-bd98-21743c6b84e7",
         },
-        "anchor": {"lat": 61.5769, "lon": 1.5259, "radius_m": 329.0},
+        "anchor": {"lat": 61.5769, "lon": 1.5259, "radius_m": 330.0},
     },
 ]
 
