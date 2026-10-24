@@ -30,6 +30,15 @@ from elements_api import fetch_channel, login
 ELEMENTS_USERNAME = os.environ.get("ELEMENTS_USERNAME")
 ELEMENTS_PASSWORD = os.environ.get("ELEMENTS_PASSWORD")
 
+# Display spec for wave-condition fields: (key in "wave_channels", label,
+# unit suffix, decimal places). A location only shows the fields it has a
+# channel ID for, in this order.
+WAVE_FIELD_SPECS = [
+    ("hs", "Hs", "m", 2),
+    ("tp", "Tp", "s", 1),
+    ("mdir", "Mdir", "°", 0),
+]
+
 # --- Azure Blob Storage -------------------------------------------------
 # Read-only, container-scoped SAS token (expires 2027-08-25). Least-privilege
 # on purpose: it can only read blobs in the "buoy-data" container, nothing
@@ -64,6 +73,7 @@ LOCATIONS = [
         "wave_channels": {
             "hs": "2bdb5270-887f-11eb-9d91-cf7c0f6efbea",
             "tp": "2baca150-887f-11eb-9d91-cf7c0f6efbea",
+            "mdir": "2b57ca90-887f-11eb-9d91-cf7c0f6efbea",
         },
     },
     {
@@ -236,11 +246,15 @@ PAGE_TEMPLATE = """<!doctype html>
     color: var(--muted);
   }}
   .wave-conditions {{
+    display: flex;
+    justify-content: flex-end;
+    gap: 14px;
     margin-bottom: 4px;
   }}
   .wave-field {{
     font-size: 12px;
     color: var(--text);
+    white-space: nowrap;
   }}
   .wave-field .wave-label {{
     color: var(--muted);
@@ -746,10 +760,14 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
         def fmt_wave(value, suffix, decimals):
             return f"{value:.{decimals}f} {suffix}" if value is not None else "N/A"
 
+        fields_html = "\n          ".join(
+            f'<div class="wave-field"><span class="wave-label">{label}:</span> {fmt_wave(waves.get(field_key), suffix, decimals)}</div>'
+            for field_key, label, suffix, decimals in WAVE_FIELD_SPECS
+            if field_key in waves
+        )
         wave_html = f"""
         <div class="wave-conditions">
-          <div class="wave-field"><span class="wave-label">Hs:</span> {fmt_wave(waves.get('hs'), 'm', 2)}</div>
-          <div class="wave-field"><span class="wave-label">Tp:</span> {fmt_wave(waves.get('tp'), 's', 1)}</div>
+          {fields_html}
         </div>"""
 
     return f"""
