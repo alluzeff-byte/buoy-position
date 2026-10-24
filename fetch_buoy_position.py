@@ -273,6 +273,9 @@ PAGE_TEMPLATE = """<!doctype html>
     gap: 14px;
     margin-bottom: 4px;
   }}
+  .wave-conditions-last {{
+    margin-bottom: 8px;
+  }}
   .wave-field {{
     font-size: 12px;
     color: var(--text);
@@ -1154,6 +1157,12 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
             )
             if fields_html:
                 rows_html.append(f'<div class="wave-conditions">\n          {fields_html}\n        </div>')
+        if rows_html:
+            # Extra gap before the "Data as of" caption, only after the last
+            # wave row - not between wave rows themselves.
+            rows_html[-1] = rows_html[-1].replace(
+                'class="wave-conditions"', 'class="wave-conditions wave-conditions-last"', 1
+            )
         wave_html = "\n        " + "\n        ".join(rows_html)
 
     return f"""
