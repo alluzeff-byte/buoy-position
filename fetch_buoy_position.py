@@ -286,19 +286,14 @@ PAGE_TEMPLATE = """<!doctype html>
     top: 8px;
     right: 8px;
     display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
-  }}
-  .window-controls-row {{
-    display: flex;
     align-items: center;
     gap: 24px;
   }}
   .custom-range {{
+    position: absolute;
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: flex-start;
     gap: 6px;
   }}
   .custom-range-field {{
@@ -387,8 +382,31 @@ PAGE_TEMPLATE = """<!doctype html>
       controls.style.top = (legendRect.bottom - chartRect.top + 28) + "px";
     }}
 
-    document.querySelectorAll(".chart").forEach(function (chartEl) {{
+    // Pin the Custom date row's left edge to the Track checkbox's own left
+    // edge (not the row container's edge, which sits a few pixels further
+    // left than the checkbox itself due to the browser's default input
+    // margin) and its top edge just below the controls row - flex alignment
+    // can't express "match another element's edge", so this is computed in JS.
+    function positionCustomRange(chartEl) {{
+      var controls = chartEl.querySelector(".window-controls");
+      var trackCheckbox = chartEl.querySelector('input[id^="track-"]');
+      var customRange = chartEl.querySelector(".custom-range");
+      if (!controls || !trackCheckbox || !customRange) return;
+      var chartRect = chartEl.getBoundingClientRect();
+      var controlsRect = controls.getBoundingClientRect();
+      var trackRect = trackCheckbox.getBoundingClientRect();
+      if (controlsRect.height === 0) return; // chart currently hidden (inactive tab)
+      customRange.style.left = (trackRect.left - chartRect.left) + "px";
+      customRange.style.top = (controlsRect.bottom - chartRect.top + 8) + "px";
+    }}
+
+    function positionControls(chartEl) {{
       positionWindowControls(chartEl);
+      positionCustomRange(chartEl);
+    }}
+
+    document.querySelectorAll(".chart").forEach(function (chartEl) {{
+      positionControls(chartEl);
     }});
 
     document.querySelectorAll(".tab-btn").forEach(function (btn) {{
@@ -404,7 +422,7 @@ PAGE_TEMPLATE = """<!doctype html>
 
         var activePanel = document.getElementById("tab-" + key);
         var chartEl = activePanel && activePanel.querySelector(".chart");
-        if (chartEl) positionWindowControls(chartEl);
+        if (chartEl) positionControls(chartEl);
       }});
     }});
 
@@ -889,23 +907,21 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
       <div class="chart">
         {plot_div}
         <div class="window-controls">
-          <div class="window-controls-row">
-            <label class="toggle-label">
-              <input type="checkbox" id="track-{key}" data-key="{key}" data-track-index="{track_trace_index}">
-              Track
-            </label>
-            <label class="toggle-label">
-              <input type="checkbox" id="direction-{key}" data-key="{key}" data-annotation-index="{direction_annotation_index}">
-              Direction
-            </label>
-            <select id="window-select-{key}" class="window-select" data-key="{key}" data-trajectory-index="{TRAJECTORY_TRACE_INDEX}">
-              {options_html}
-            </select>
-          </div>
-          <div class="custom-range" id="custom-range-{key}" hidden>
-            <label class="custom-range-field">Start <input type="datetime-local" id="custom-start-{key}" data-key="{key}"></label>
-            <label class="custom-range-field">End <input type="datetime-local" id="custom-end-{key}" data-key="{key}"></label>
-          </div>
+          <label class="toggle-label">
+            <input type="checkbox" id="track-{key}" data-key="{key}" data-track-index="{track_trace_index}">
+            Track
+          </label>
+          <label class="toggle-label">
+            <input type="checkbox" id="direction-{key}" data-key="{key}" data-annotation-index="{direction_annotation_index}">
+            Direction
+          </label>
+          <select id="window-select-{key}" class="window-select" data-key="{key}" data-trajectory-index="{TRAJECTORY_TRACE_INDEX}">
+            {options_html}
+          </select>
+        </div>
+        <div class="custom-range" id="custom-range-{key}" hidden>
+          <label class="custom-range-field">Start <input type="datetime-local" id="custom-start-{key}" data-key="{key}"></label>
+          <label class="custom-range-field">End <input type="datetime-local" id="custom-end-{key}" data-key="{key}"></label>
         </div>
         <div class="side-controls">{wave_html}
           <div class="last-updated" data-timestamp="{dataset['latest_timestamp']}">Data as of: {dataset['latest_timestamp']}</div>
