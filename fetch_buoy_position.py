@@ -31,16 +31,17 @@ ELEMENTS_USERNAME = os.environ.get("ELEMENTS_USERNAME")
 ELEMENTS_PASSWORD = os.environ.get("ELEMENTS_PASSWORD")
 
 # Display spec for wave-condition fields: (key in "wave_channels", label,
-# unit suffix, decimal places). A location only shows the fields it has a
-# channel ID for, in this order.
+# unit suffix, decimal places, row). Row 1 is the top row, row 2 sits
+# directly above "Data as of" - a location only shows the rows/fields it
+# has channel IDs for.
 WAVE_FIELD_SPECS = [
-    ("hs", "Hs", "m", 2),
-    ("tp", "Tp", "s", 1),
-    ("t2", "T2", "s", 1),
-    ("mdir", "Mdir", "°", 0),
-    ("pdir", "Pdir", "°", 0),
-    ("cs", "CS", "m/s", 2),
-    ("cd", "CD", "°", 0),
+    ("cs", "CS", "m/s", 2, 1),
+    ("cd", "CD", "°", 0, 1),
+    ("hs", "Hs", "m", 2, 2),
+    ("tp", "Tp", "s", 1, 2),
+    ("t2", "T2", "s", 1, 2),
+    ("mdir", "Mdir", "°", 0, 2),
+    ("pdir", "Pdir", "°", 0, 2),
 ]
 
 # --- Azure Blob Storage -------------------------------------------------
@@ -779,15 +780,16 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
         def fmt_wave(value, suffix, decimals):
             return f"{value:.{decimals}f} {suffix}" if value is not None else "N/A"
 
-        fields_html = "\n          ".join(
-            f'<div class="wave-field"><span class="wave-label">{label}:</span> {fmt_wave(waves.get(field_key), suffix, decimals)}</div>'
-            for field_key, label, suffix, decimals in WAVE_FIELD_SPECS
-            if field_key in waves
-        )
-        wave_html = f"""
-        <div class="wave-conditions">
-          {fields_html}
-        </div>"""
+        rows_html = []
+        for row_num in sorted({row for *_, row in WAVE_FIELD_SPECS}):
+            fields_html = "\n          ".join(
+                f'<div class="wave-field"><span class="wave-label">{label}:</span> {fmt_wave(waves.get(field_key), suffix, decimals)}</div>'
+                for field_key, label, suffix, decimals, row in WAVE_FIELD_SPECS
+                if row == row_num and field_key in waves
+            )
+            if fields_html:
+                rows_html.append(f'<div class="wave-conditions">\n          {fields_html}\n        </div>')
+        wave_html = "\n        " + "\n        ".join(rows_html)
 
     return f"""
     <div class="card">
