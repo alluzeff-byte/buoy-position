@@ -80,6 +80,7 @@ LOCATIONS = [
             "tp": "2baca150-887f-11eb-9d91-cf7c0f6efbea",
             "t2": "2be2cc80-887f-11eb-9d91-cf7c0f6efbea",
             "mdir": "2b57ca90-887f-11eb-9d91-cf7c0f6efbea",
+            "pdir": "2b7e1740-887f-11eb-9d91-cf7c0f6efbea",
         },
     },
     {
@@ -92,6 +93,7 @@ LOCATIONS = [
             "tp": "909adbe0-9c75-11f0-8f61-ffb240084fa4",
             "t2": "90e15ac0-9c75-11f0-8f61-ffb240084fa4",
             "mdir": "646344f0-a458-11f0-89c3-2ba086547dfc",
+            "pdir": "644b5020-a458-11f0-89c3-2ba086547dfc",
             "cs": "91428d90-9c75-11f0-8f61-ffb240084fa4",
             "cd": "92031e70-9c75-11f0-8f61-ffb240084fa4",
         },
