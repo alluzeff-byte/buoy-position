@@ -74,7 +74,7 @@ LOCATIONS = [
         "key": "pierce",
         "label": "Pierce",
         "blob_name": "Pierce_buoy_position.csv",
-        "anchor": {"lat": 57.1561, "lon": 2.2691, "radius_m": 130.0},
+        "anchor": {"lat": 57.1561, "lon": 2.2692, "radius_m": 104.0},
         "wave_channels": {
             "hs": "2bdb5270-887f-11eb-9d91-cf7c0f6efbea",
             "tp": "2baca150-887f-11eb-9d91-cf7c0f6efbea",
@@ -291,10 +291,12 @@ PAGE_TEMPLATE = """<!doctype html>
   }}
   .custom-range {{
     position: absolute;
-    display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
+  }}
+  .custom-range:not([hidden]) {{
+    display: flex;
   }}
   .custom-range-field {{
     display: flex;
