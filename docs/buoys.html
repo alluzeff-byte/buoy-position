@@ -257,7 +257,7 @@
           <div class="wave-field"><span class="wave-label">Hs:</span> 2.84 m</div>
           <div class="wave-field"><span class="wave-label">Tp:</span> 13.3 s</div>
           <div class="wave-field"><span class="wave-label">T2:</span> 5.4 s</div>
-          <div class="wave-field"><span class="wave-label">Mdir:</span> 197 °</div>
+          <div class="wave-field"><span class="wave-label">Mdir:</span> 196 °</div>
           <div class="wave-field"><span class="wave-label">Pdir:</span> 278 °</div>
         </div>
           <div class="last-updated" data-timestamp="2026-10-24T15:30:00Z">Data as of: 2026-10-24T15:30:00Z</div>
@@ -495,11 +495,22 @@
       });
     });
 
+    function applyCustomRangeFromInput(input) {
+      var key = input.dataset.key;
+      computeCustomRange(key);
+      applyCurrentWindow(key);
+    }
+
     document.querySelectorAll('.custom-range-field input[type="datetime-local"]').forEach(function (input) {
       input.addEventListener("change", function () {
-        var key = input.dataset.key;
-        computeCustomRange(key);
-        applyCurrentWindow(key);
+        applyCustomRangeFromInput(input);
+      });
+      // "change" alone only fires once the field loses focus - Enter should
+      // redraw immediately without requiring the user to click away first.
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          applyCustomRangeFromInput(input);
+        }
       });
     });
 

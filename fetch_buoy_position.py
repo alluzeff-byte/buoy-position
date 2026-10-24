@@ -531,11 +531,22 @@ PAGE_TEMPLATE = """<!doctype html>
       }});
     }});
 
+    function applyCustomRangeFromInput(input) {{
+      var key = input.dataset.key;
+      computeCustomRange(key);
+      applyCurrentWindow(key);
+    }}
+
     document.querySelectorAll('.custom-range-field input[type="datetime-local"]').forEach(function (input) {{
       input.addEventListener("change", function () {{
-        var key = input.dataset.key;
-        computeCustomRange(key);
-        applyCurrentWindow(key);
+        applyCustomRangeFromInput(input);
+      }});
+      // "change" alone only fires once the field loses focus - Enter should
+      // redraw immediately without requiring the user to click away first.
+      input.addEventListener("keydown", function (event) {{
+        if (event.key === "Enter") {{
+          applyCustomRangeFromInput(input);
+        }}
       }});
     }});
 
