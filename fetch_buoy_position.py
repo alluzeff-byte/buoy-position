@@ -267,6 +267,12 @@ PAGE_TEMPLATE = """<!doctype html>
     font-size: 12px;
     color: var(--muted);
   }}
+  .site-footer {{
+    margin-top: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+  }}
   .wave-conditions {{
     display: flex;
     justify-content: flex-end;
@@ -362,6 +368,7 @@ PAGE_TEMPLATE = """<!doctype html>
       <h1 id="page-title">{initial_title}</h1>
     </div>
     {tab_panels}
+    <div class="site-footer">© AlluZeff</div>
   </div>
   <script>
     window.__windowData = {window_data_json};
