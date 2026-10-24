@@ -286,8 +286,34 @@ PAGE_TEMPLATE = """<!doctype html>
     top: 8px;
     right: 8px;
     display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }}
+  .window-controls-row {{
+    display: flex;
     align-items: center;
     gap: 24px;
+  }}
+  .custom-range-row {{
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }}
+  .custom-range-row label {{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }}
+  .custom-range-row input[type="date"] {{
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 12px;
+    color: var(--text);
+    background: #ffffff;
   }}
   .toggle-label {{
     display: flex;
@@ -327,6 +353,7 @@ PAGE_TEMPLATE = """<!doctype html>
   <script>
     window.__windowData = {window_data_json};
     window.__latestData = {latest_data_json};
+    window.__customRanges = {{}};
 
     // Render each "Data as of" timestamp in the viewer's own local time zone
     // (the underlying value is UTC, embedded in data-timestamp).
@@ -385,6 +412,9 @@ PAGE_TEMPLATE = """<!doctype html>
     // window, not just the trajectory markers.
     function currentWindow(key) {{
       var select = document.getElementById("window-select-" + key);
+      if (select.value === "Custom") {{
+        return window.__customRanges[key] || {{ x: [], y: [], customdata: [] }};
+      }}
       return window.__windowData[key][select.value];
     }}
 
@@ -407,25 +437,84 @@ PAGE_TEMPLATE = """<!doctype html>
       Plotly.relayout(gd, update);
     }}
 
+    // "Custom" has no precomputed window - it's filtered client-side from
+    // the longest available precomputed range ("30 days"), which is as far
+    // back as the page has data for.
+    function parseCustomTimestamp(s) {{
+      return new Date(s.replace(" UTC", "Z").replace(" ", "T"));
+    }}
+
+    function computeCustomRange(key) {{
+      var startInput = document.getElementById("custom-start-" + key);
+      var endInput = document.getElementById("custom-end-" + key);
+      if (!startInput.value || !endInput.value) return;
+      var start = new Date(startInput.value + "T00:00:00Z");
+      var end = new Date(endInput.value + "T23:59:59Z");
+      var full = window.__windowData[key]["30 days"];
+      var x = [], y = [], customdata = [];
+      for (var i = 0; i < full.customdata.length; i++) {{
+        var t = parseCustomTimestamp(full.customdata[i]);
+        if (t >= start && t <= end) {{
+          x.push(full.x[i]);
+          y.push(full.y[i]);
+          customdata.push(full.customdata[i]);
+        }}
+      }}
+      window.__customRanges[key] = {{ x: x, y: y, customdata: customdata }};
+    }}
+
+    function applyCurrentWindow(key) {{
+      var gd = document.getElementById("plot-" + key);
+      var select = document.getElementById("window-select-" + key);
+      var trajIdx = parseInt(select.dataset.trajectoryIndex, 10);
+      var w = currentWindow(key);
+      Plotly.restyle(gd, {{ x: [w.x], y: [w.y], customdata: [w.customdata] }}, [trajIdx]);
+
+      var trackCheckbox = document.getElementById("track-" + key);
+      if (trackCheckbox && trackCheckbox.checked) {{
+        var trackIdx = parseInt(trackCheckbox.dataset.trackIndex, 10);
+        var t = trackXY(key);
+        Plotly.restyle(gd, {{ x: [t.x], y: [t.y] }}, [trackIdx]);
+      }}
+
+      var directionCheckbox = document.getElementById("direction-" + key);
+      if (directionCheckbox && directionCheckbox.checked) {{
+        updateDirectionArrow(gd, key, parseInt(directionCheckbox.dataset.annotationIndex, 10));
+      }}
+    }}
+
     document.querySelectorAll(".window-select").forEach(function (select) {{
       select.addEventListener("change", function () {{
         var key = select.dataset.key;
-        var gd = document.getElementById("plot-" + key);
-        var trajIdx = parseInt(select.dataset.trajectoryIndex, 10);
-        var w = window.__windowData[key][select.value];
-        Plotly.restyle(gd, {{ x: [w.x], y: [w.y], customdata: [w.customdata] }}, [trajIdx]);
+        var rangeRow = document.getElementById("custom-range-" + key);
 
-        var trackCheckbox = document.getElementById("track-" + key);
-        if (trackCheckbox && trackCheckbox.checked) {{
-          var trackIdx = parseInt(trackCheckbox.dataset.trackIndex, 10);
-          var t = trackXY(key);
-          Plotly.restyle(gd, {{ x: [t.x], y: [t.y] }}, [trackIdx]);
+        if (select.value === "Custom") {{
+          rangeRow.hidden = false;
+          var startInput = document.getElementById("custom-start-" + key);
+          var endInput = document.getElementById("custom-end-" + key);
+          if (!startInput.value || !endInput.value) {{
+            var full = window.__windowData[key]["30 days"];
+            var endDate = full.customdata.length
+              ? parseCustomTimestamp(full.customdata[full.customdata.length - 1])
+              : new Date();
+            var startDate = new Date(endDate.getTime() - 3 * 24 * 60 * 60 * 1000);
+            endInput.value = endDate.toISOString().slice(0, 10);
+            startInput.value = startDate.toISOString().slice(0, 10);
+          }}
+          computeCustomRange(key);
+        }} else {{
+          rangeRow.hidden = true;
         }}
 
-        var directionCheckbox = document.getElementById("direction-" + key);
-        if (directionCheckbox && directionCheckbox.checked) {{
-          updateDirectionArrow(gd, key, parseInt(directionCheckbox.dataset.annotationIndex, 10));
-        }}
+        applyCurrentWindow(key);
+      }});
+    }});
+
+    document.querySelectorAll('.custom-range-row input[type="date"]').forEach(function (input) {{
+      input.addEventListener("change", function () {{
+        var key = input.dataset.key;
+        computeCustomRange(key);
+        applyCurrentWindow(key);
       }});
     }});
 
@@ -775,6 +864,7 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
         f'<option value="{label}"{" selected" if label == DEFAULT_WINDOW_LABEL else ""}>{label}</option>'
         for label in WINDOW_LABELS
     )
+    options_html += '\n          <option value="Custom">Custom</option>'
 
     wave_html = ""
     waves = dataset.get("waves")
@@ -798,17 +888,23 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
       <div class="chart">
         {plot_div}
         <div class="window-controls">
-          <label class="toggle-label">
-            <input type="checkbox" id="track-{key}" data-key="{key}" data-track-index="{track_trace_index}">
-            Track
-          </label>
-          <label class="toggle-label">
-            <input type="checkbox" id="direction-{key}" data-key="{key}" data-annotation-index="{direction_annotation_index}">
-            Direction
-          </label>
-          <select id="window-select-{key}" class="window-select" data-key="{key}" data-trajectory-index="{TRAJECTORY_TRACE_INDEX}">
-            {options_html}
-          </select>
+          <div class="window-controls-row">
+            <label class="toggle-label">
+              <input type="checkbox" id="track-{key}" data-key="{key}" data-track-index="{track_trace_index}">
+              Track
+            </label>
+            <label class="toggle-label">
+              <input type="checkbox" id="direction-{key}" data-key="{key}" data-annotation-index="{direction_annotation_index}">
+              Direction
+            </label>
+            <select id="window-select-{key}" class="window-select" data-key="{key}" data-trajectory-index="{TRAJECTORY_TRACE_INDEX}">
+              {options_html}
+            </select>
+          </div>
+          <div class="custom-range-row" id="custom-range-{key}" hidden>
+            <label>Start <input type="date" id="custom-start-{key}" data-key="{key}"></label>
+            <label>End <input type="date" id="custom-end-{key}" data-key="{key}"></label>
+          </div>
         </div>
         <div class="side-controls">{wave_html}
           <div class="last-updated" data-timestamp="{dataset['latest_timestamp']}">Data as of: {dataset['latest_timestamp']}</div>
