@@ -295,19 +295,20 @@ PAGE_TEMPLATE = """<!doctype html>
     align-items: center;
     gap: 24px;
   }}
-  .custom-range-row {{
+  .custom-range {{
     display: flex;
-    align-items: center;
-    gap: 14px;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
   }}
-  .custom-range-row label {{
+  .custom-range-field {{
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 12px;
     color: var(--muted);
   }}
-  .custom-range-row input[type="date"] {{
+  .custom-range-field input[type="datetime-local"] {{
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 3px 6px;
@@ -448,8 +449,8 @@ PAGE_TEMPLATE = """<!doctype html>
       var startInput = document.getElementById("custom-start-" + key);
       var endInput = document.getElementById("custom-end-" + key);
       if (!startInput.value || !endInput.value) return;
-      var start = new Date(startInput.value + "T00:00:00Z");
-      var end = new Date(endInput.value + "T23:59:59Z");
+      var start = new Date(startInput.value + "Z");
+      var end = new Date(endInput.value + "Z");
       var full = window.__windowData[key]["30 days"];
       var x = [], y = [], customdata = [];
       for (var i = 0; i < full.customdata.length; i++) {{
@@ -498,8 +499,8 @@ PAGE_TEMPLATE = """<!doctype html>
               ? parseCustomTimestamp(full.customdata[full.customdata.length - 1])
               : new Date();
             var startDate = new Date(endDate.getTime() - 3 * 24 * 60 * 60 * 1000);
-            endInput.value = endDate.toISOString().slice(0, 10);
-            startInput.value = startDate.toISOString().slice(0, 10);
+            endInput.value = endDate.toISOString().slice(0, 16);
+            startInput.value = startDate.toISOString().slice(0, 16);
           }}
           computeCustomRange(key);
         }} else {{
@@ -510,7 +511,7 @@ PAGE_TEMPLATE = """<!doctype html>
       }});
     }});
 
-    document.querySelectorAll('.custom-range-row input[type="date"]').forEach(function (input) {{
+    document.querySelectorAll('.custom-range-field input[type="datetime-local"]').forEach(function (input) {{
       input.addEventListener("change", function () {{
         var key = input.dataset.key;
         computeCustomRange(key);
@@ -901,9 +902,9 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
               {options_html}
             </select>
           </div>
-          <div class="custom-range-row" id="custom-range-{key}" hidden>
-            <label>Start <input type="date" id="custom-start-{key}" data-key="{key}"></label>
-            <label>End <input type="date" id="custom-end-{key}" data-key="{key}"></label>
+          <div class="custom-range" id="custom-range-{key}" hidden>
+            <label class="custom-range-field">Start <input type="datetime-local" id="custom-start-{key}" data-key="{key}"></label>
+            <label class="custom-range-field">End <input type="datetime-local" id="custom-end-{key}" data-key="{key}"></label>
           </div>
         </div>
         <div class="side-controls">{wave_html}
