@@ -38,6 +38,7 @@ WAVE_FIELD_SPECS = [
     ("tp", "Tp", "s", 1),
     ("t2", "T2", "s", 1),
     ("mdir", "Mdir", "°", 0),
+    ("pdir", "Pdir", "°", 0),
     ("cs", "CS", "m/s", 2),
     ("cd", "CD", "°", 0),
 ]
@@ -98,7 +99,14 @@ LOCATIONS = [
         "key": "penguins-sat",
         "label": "Penguins(sat)",
         "blob_name": "Penguins(sat)_buoy_position.csv",
-        "wave_channels": None,
+        "wave_channels": {
+            "hs": "3b260fa0-f7a5-11f0-bd98-21743c6b84e7",
+            "tp": "3b383810-f7a5-11f0-bd98-21743c6b84e7",
+            "t2": "3b4afcc0-f7a5-11f0-bd98-21743c6b84e7",
+            "pdir": "3b7f2c20-f7a5-11f0-bd98-21743c6b84e7",
+            "cs": "3b6c8e80-f7a5-11f0-bd98-21743c6b84e7",
+            "cd": "3b60f5c0-f7a5-11f0-bd98-21743c6b84e7",
+        },
         "anchor": {"lat": 61.5768, "lon": 1.5258, "radius_m": 330.0},
     },
 ]
