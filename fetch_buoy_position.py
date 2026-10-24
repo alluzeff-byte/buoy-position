@@ -289,6 +289,9 @@ PAGE_TEMPLATE = """<!doctype html>
     align-items: center;
     gap: 24px;
   }}
+  .pca-row {{
+    position: absolute;
+  }}
   .custom-range {{
     position: absolute;
     flex-direction: column;
@@ -384,26 +387,53 @@ PAGE_TEMPLATE = """<!doctype html>
       controls.style.top = (legendRect.bottom - chartRect.top + 28) + "px";
     }}
 
-    // Pin the Custom date row's left edge to the Track checkbox's own left
-    // edge (not the row container's edge, which sits a few pixels further
-    // left than the checkbox itself due to the browser's default input
-    // margin) and its top edge just below the controls row - flex alignment
-    // can't express "match another element's edge", so this is computed in JS.
-    function positionCustomRange(chartEl) {{
+    // Pin the PCA row's left edge to the Track checkbox's own left edge (not
+    // the row container's edge, which sits a few pixels further left than
+    // the checkbox itself due to the browser's default input margin) and
+    // its top edge just below the controls row - flex alignment can't
+    // express "match another element's edge", so this is computed in JS.
+    function positionPcaRow(chartEl) {{
       var controls = chartEl.querySelector(".window-controls");
       var trackCheckbox = chartEl.querySelector('input[id^="track-"]');
-      var customRange = chartEl.querySelector(".custom-range");
-      if (!controls || !trackCheckbox || !customRange) return;
+      var pcaRow = chartEl.querySelector(".pca-row");
+      var pcaCheckbox = chartEl.querySelector('input[id^="pca-"]');
+      if (!controls || !trackCheckbox || !pcaRow || !pcaCheckbox) return null;
       var chartRect = chartEl.getBoundingClientRect();
       var controlsRect = controls.getBoundingClientRect();
       var trackRect = trackCheckbox.getBoundingClientRect();
-      if (controlsRect.height === 0) return; // chart currently hidden (inactive tab)
+      if (controlsRect.height === 0) return null; // chart currently hidden (inactive tab)
+      var left = trackRect.left - chartRect.left;
+      var top = controlsRect.bottom - chartRect.top + 8;
+      pcaRow.style.left = left + "px";
+      pcaRow.style.top = top + "px";
+      // Same default-input-margin issue as Track itself: the PCA checkbox
+      // (first child of its own row, like Track is of its row) sits a few
+      // pixels right of the row's own edge. One correction pass fixes it.
+      var residual = trackRect.left - pcaCheckbox.getBoundingClientRect().left;
+      if (residual !== 0) {{
+        pcaRow.style.left = (left + residual) + "px";
+      }}
+      return pcaRow.getBoundingClientRect();
+    }}
+
+    // Custom date row goes directly below the PCA row (same left edge),
+    // so it shifts down automatically when the PCA row's own height changes.
+    function positionCustomRange(chartEl) {{
+      var trackCheckbox = chartEl.querySelector('input[id^="track-"]');
+      var pcaRow = chartEl.querySelector(".pca-row");
+      var customRange = chartEl.querySelector(".custom-range");
+      if (!trackCheckbox || !pcaRow || !customRange) return;
+      var chartRect = chartEl.getBoundingClientRect();
+      var trackRect = trackCheckbox.getBoundingClientRect();
+      var pcaRect = pcaRow.getBoundingClientRect();
+      if (pcaRect.height === 0) return; // chart currently hidden (inactive tab)
       customRange.style.left = (trackRect.left - chartRect.left) + "px";
-      customRange.style.top = (controlsRect.bottom - chartRect.top + 8) + "px";
+      customRange.style.top = (pcaRect.bottom - chartRect.top + 8) + "px";
     }}
 
     function positionControls(chartEl) {{
       positionWindowControls(chartEl);
+      positionPcaRow(chartEl);
       positionCustomRange(chartEl);
     }}
 
@@ -458,6 +488,62 @@ PAGE_TEMPLATE = """<!doctype html>
       Plotly.relayout(gd, update);
     }}
 
+    // Dominant axis of spatial spread (first principal component) within
+    // the current window - mirrors compute_pca_axis() in Python, used for
+    // the initial render; this is the client-side version used whenever the
+    // window selection changes. Longitude is corrected for cos(latitude)
+    // before computing covariance, so the axis direction reflects true
+    // physical distance, not raw degrees.
+    function computePcaAxis(key) {{
+      var w = currentWindow(key);
+      var n = w.x.length;
+      if (n < 2) return {{ x: [], y: [] }};
+
+      var lat0 = 0, lon0 = 0;
+      for (var i = 0; i < n; i++) {{ lon0 += w.x[i]; lat0 += w.y[i]; }}
+      lon0 /= n;
+      lat0 /= n;
+
+      var mPerDegLat = 111320;
+      var mPerDegLon = 111320 * Math.cos(lat0 * Math.PI / 180);
+
+      var sxx = 0, syy = 0, sxy = 0;
+      for (var j = 0; j < n; j++) {{
+        var px = (w.x[j] - lon0) * mPerDegLon;
+        var py = (w.y[j] - lat0) * mPerDegLat;
+        sxx += px * px;
+        syy += py * py;
+        sxy += px * py;
+      }}
+      sxx /= n;
+      syy /= n;
+      sxy /= n;
+
+      var trace = sxx + syy;
+      var det = sxx * syy - sxy * sxy;
+      var disc = Math.sqrt(Math.max(trace * trace / 4 - det, 0));
+      var lambda1 = trace / 2 + disc;
+
+      var vx, vy;
+      if (sxy !== 0) {{
+        vx = lambda1 - syy;
+        vy = sxy;
+      }} else {{
+        vx = sxx >= syy ? 1 : 0;
+        vy = sxx >= syy ? 0 : 1;
+      }}
+      var norm = Math.sqrt(vx * vx + vy * vy) || 1;
+      vx /= norm;
+      vy /= norm;
+
+      var std1 = Math.sqrt(Math.max(lambda1, 0));
+      var halfLen = 2.2 * std1;
+      var dLon = (vx * halfLen) / mPerDegLon;
+      var dLat = (vy * halfLen) / mPerDegLat;
+
+      return {{ x: [lon0 - dLon, lon0 + dLon], y: [lat0 - dLat, lat0 + dLat] }};
+    }}
+
     // "Custom" has no precomputed window - it's filtered client-side from
     // the longest available precomputed range ("30 days"), which is as far
     // back as the page has data for.
@@ -501,6 +587,13 @@ PAGE_TEMPLATE = """<!doctype html>
       var directionCheckbox = document.getElementById("direction-" + key);
       if (directionCheckbox && directionCheckbox.checked) {{
         updateDirectionArrow(gd, key, parseInt(directionCheckbox.dataset.annotationIndex, 10));
+      }}
+
+      var pcaCheckbox = document.getElementById("pca-" + key);
+      if (pcaCheckbox && pcaCheckbox.checked) {{
+        var pcaIdx = parseInt(pcaCheckbox.dataset.pcaIndex, 10);
+        var axis = computePcaAxis(key);
+        Plotly.restyle(gd, {{ x: [axis.x], y: [axis.y] }}, [pcaIdx]);
       }}
     }}
 
@@ -581,6 +674,20 @@ PAGE_TEMPLATE = """<!doctype html>
         }}
       }});
     }});
+
+    document.querySelectorAll('input[id^="pca-"]').forEach(function (checkbox) {{
+      checkbox.addEventListener("change", function () {{
+        var key = checkbox.dataset.key;
+        var gd = document.getElementById("plot-" + key);
+        var pcaIdx = parseInt(checkbox.dataset.pcaIndex, 10);
+        if (checkbox.checked) {{
+          var axis = computePcaAxis(key);
+          Plotly.restyle(gd, {{ x: [axis.x], y: [axis.y], visible: true }}, [pcaIdx]);
+        }} else {{
+          Plotly.restyle(gd, {{ visible: false }}, [pcaIdx]);
+        }}
+      }});
+    }});
   </script>
 </body>
 </html>
@@ -643,6 +750,42 @@ def format_anchor_position(lat_deg: float, lon_deg: float) -> str:
     lat_dir = "N" if lat_deg >= 0 else "S"
     lon_dir = "E" if lon_deg >= 0 else "W"
     return f"{abs(lat_deg):.4f}{lat_dir}, {abs(lon_deg):.4f}{lon_dir}"
+
+
+def compute_pca_axis(lons: list, lats: list) -> tuple:
+    """Dominant axis of spatial spread (first principal component) for a set
+    of lon/lat points, as a 2-point line through the centroid spanning the
+    data's spread (+-2.2 std along the axis). Longitude is corrected for the
+    cos(latitude) distortion before computing covariance, so the axis
+    direction reflects true physical distance, not raw degrees. Mirrors the
+    client-side JS version used when the window selection changes."""
+    if len(lons) < 2:
+        return [], []
+    lat0 = sum(lats) / len(lats)
+    lon0 = sum(lons) / len(lons)
+    m_per_deg_lat = 111320.0
+    m_per_deg_lon = 111320.0 * math.cos(math.radians(lat0))
+    xs = [(lon - lon0) * m_per_deg_lon for lon in lons]
+    ys = [(lat - lat0) * m_per_deg_lat for lat in lats]
+    n = len(xs)
+    sxx = sum(x * x for x in xs) / n
+    syy = sum(y * y for y in ys) / n
+    sxy = sum(x * y for x, y in zip(xs, ys)) / n
+    trace = sxx + syy
+    det = sxx * syy - sxy * sxy
+    disc = math.sqrt(max(trace * trace / 4 - det, 0))
+    lambda1 = trace / 2 + disc
+    if sxy != 0:
+        vx, vy = lambda1 - syy, sxy
+    else:
+        vx, vy = (1.0, 0.0) if sxx >= syy else (0.0, 1.0)
+    norm = math.hypot(vx, vy) or 1
+    vx, vy = vx / norm, vy / norm
+    std1 = math.sqrt(max(lambda1, 0))
+    half_len = 2.2 * std1
+    d_lon = (vx * half_len) / m_per_deg_lon
+    d_lat = (vy * half_len) / m_per_deg_lat
+    return [lon0 - d_lon, lon0 + d_lon], [lat0 - d_lat, lat0 + d_lat]
 
 
 def fetch_positions(location: dict) -> tuple[pd.DataFrame, datetime]:
@@ -838,6 +981,24 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
         )
     )
 
+    # PCA axis: dominant direction of spatial spread within the selected
+    # window (first principal component, through the centroid). Off by
+    # default - toggled by the "PCA" checkbox.
+    pca_trace_index = len(fig.data)
+    pca_x, pca_y = compute_pca_axis(default_window["x"], default_window["y"])
+    fig.add_trace(
+        go.Scatter(
+            x=pca_x,
+            y=pca_y,
+            mode="lines",
+            line=dict(color="#e67e22", width=2, dash="dot"),
+            name="PCA axis",
+            showlegend=False,
+            hoverinfo="skip",
+            visible=False,
+        )
+    )
+
     # Direction arrow: earliest trajectory point in the selected window to
     # the latest buoy position. Off by default - toggled by the "Direction"
     # checkbox. A layout annotation (not a trace), since Plotly's arrowheads
@@ -931,6 +1092,12 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
           <select id="window-select-{key}" class="window-select" data-key="{key}" data-trajectory-index="{TRAJECTORY_TRACE_INDEX}">
             {options_html}
           </select>
+        </div>
+        <div class="pca-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="pca-{key}" data-key="{key}" data-pca-index="{pca_trace_index}">
+            PCA
+          </label>
         </div>
         <div class="custom-range" id="custom-range-{key}" hidden>
           <label class="custom-range-field">Start <input type="datetime-local" id="custom-start-{key}" data-key="{key}"></label>
