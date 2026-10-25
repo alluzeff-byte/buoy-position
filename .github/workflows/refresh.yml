@@ -24,6 +24,8 @@ jobs:
       - name: Generate page
         env:
           BUOY_BLOB_SAS_TOKEN: ${{ secrets.BUOY_BLOB_SAS_TOKEN }}
+          ELEMENTS_USERNAME: ${{ secrets.ELEMENTS_USERNAME }}
+          ELEMENTS_PASSWORD: ${{ secrets.ELEMENTS_PASSWORD }}
           CI: "true"
         run: python fetch_buoy_position.py
 
