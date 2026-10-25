@@ -613,7 +613,7 @@ PAGE_TEMPLATE = """<!doctype html>
       var full = window.__windowData[key]["30 days"];
       var x = [], y = [], customdata = [];
       for (var i = 0; i < full.customdata.length; i++) {{
-        var t = parseCustomTimestamp(full.customdata[i]);
+        var t = parseCustomTimestamp(full.customdata[i][0]);
         if (t >= start && t <= end) {{
           x.push(full.x[i]);
           y.push(full.y[i]);
@@ -660,7 +660,7 @@ PAGE_TEMPLATE = """<!doctype html>
           if (!startInput.value || !endInput.value) {{
             var full = window.__windowData[key]["30 days"];
             var endDate = full.customdata.length
-              ? parseCustomTimestamp(full.customdata[full.customdata.length - 1])
+              ? parseCustomTimestamp(full.customdata[full.customdata.length - 1][0])
               : new Date();
             var startDate = new Date(endDate.getTime() - 3 * 24 * 60 * 60 * 1000);
             endInput.value = endDate.toISOString().slice(0, 16);
@@ -802,6 +802,55 @@ def vincenty_direct(lat_deg: float, lon_deg: float, bearing_deg: float, distance
     return math.degrees(lat2), math.degrees(lon2)
 
 
+def vincenty_distance_m(lat1_deg: float, lon1_deg: float, lat2_deg, lon2_deg):
+    """Ellipsoidal geodesic distance (m) between (lat1_deg, lon1_deg) and each point in
+    (lat2_deg, lon2_deg) on the WGS84 ellipsoid (Vincenty inverse formula). Vectorized;
+    lat2_deg/lon2_deg may be arrays."""
+    a, f, b = WGS84_A, WGS84_F, WGS84_B
+    lat1 = np.radians(lat1_deg)
+    lat2 = np.radians(np.asarray(lat2_deg, dtype=float))
+    big_l = np.radians(np.asarray(lon2_deg, dtype=float) - lon1_deg)
+
+    tan_u1 = (1 - f) * np.tan(lat1)
+    cos_u1 = 1 / np.sqrt(1 + tan_u1**2)
+    sin_u1 = tan_u1 * cos_u1
+    tan_u2 = (1 - f) * np.tan(lat2)
+    cos_u2 = 1 / np.sqrt(1 + tan_u2**2)
+    sin_u2 = tan_u2 * cos_u2
+
+    lam = big_l
+    for _ in range(20):
+        sin_lambda, cos_lambda = np.sin(lam), np.cos(lam)
+        sin_sigma = np.sqrt(
+            (cos_u2 * sin_lambda) ** 2 + (cos_u1 * sin_u2 - sin_u1 * cos_u2 * cos_lambda) ** 2
+        )
+        sin_sigma_safe = np.where(sin_sigma == 0, 1e-30, sin_sigma)
+        cos_sigma = sin_u1 * sin_u2 + cos_u1 * cos_u2 * cos_lambda
+        sigma = np.arctan2(sin_sigma, cos_sigma)
+        sin_alpha = cos_u1 * cos_u2 * sin_lambda / sin_sigma_safe
+        cos_sq_alpha = 1 - sin_alpha**2
+        cos_sq_alpha_safe = np.where(cos_sq_alpha == 0, 1e-30, cos_sq_alpha)
+        cos2_sigma_m = cos_sigma - 2 * sin_u1 * sin_u2 / cos_sq_alpha_safe
+        cap_c = f / 16 * cos_sq_alpha * (4 + f * (4 - 3 * cos_sq_alpha))
+        lam = big_l + (1 - cap_c) * f * sin_alpha * (
+            sigma + cap_c * sin_sigma * (cos2_sigma_m + cap_c * cos_sigma * (-1 + 2 * cos2_sigma_m**2))
+        )
+
+    u_sq = cos_sq_alpha * (a**2 - b**2) / b**2
+    cap_a = 1 + u_sq / 16384 * (4096 + u_sq * (-768 + u_sq * (320 - 175 * u_sq)))
+    cap_b = u_sq / 1024 * (256 + u_sq * (-128 + u_sq * (74 - 47 * u_sq)))
+    delta_sigma = cap_b * sin_sigma * (
+        cos2_sigma_m
+        + cap_b
+        / 4
+        * (
+            cos_sigma * (-1 + 2 * cos2_sigma_m**2)
+            - cap_b / 6 * cos2_sigma_m * (-3 + 4 * sin_sigma**2) * (-3 + 4 * cos2_sigma_m**2)
+        )
+    )
+    return b * cap_a * (sigma - delta_sigma)
+
+
 def format_anchor_position(lat_deg: float, lon_deg: float) -> str:
     lat_dir = "N" if lat_deg >= 0 else "S"
     lon_dir = "E" if lon_deg >= 0 else "W"
@@ -897,31 +946,49 @@ def fetch_latest_waves(session: requests.Session, wave_channels: dict) -> dict:
     return values
 
 
-def build_dataset(positions: pd.DataFrame, now: datetime) -> dict:
+def build_dataset(positions: pd.DataFrame, now: datetime, anchor: dict = None) -> dict:
     """Everything a location's page section needs that can change on an
     "Update" refresh: the trajectory for each dropdown window, and the
-    latest-position marker."""
+    latest-position marker. When an anchor is known, each point's customdata
+    also carries its excursion distance (m) from the anchor, for the hover
+    tooltip."""
     latest = positions.iloc[-1]
     other_points = positions.iloc[:-1]
+
+    if anchor is not None:
+        other_points = other_points.copy()
+        other_points["distance_m"] = vincenty_distance_m(
+            anchor["lat"], anchor["lon"], other_points["lat"], other_points["lon"]
+        )
+        latest_distance_m = float(vincenty_distance_m(anchor["lat"], anchor["lon"], latest["lat"], latest["lon"]))
 
     windows = {}
     for label, delta in WINDOW_OPTIONS:
         cutoff = now - delta
         subset = other_points[other_points["timestamp"] >= cutoff]
+        time_strs = subset["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S UTC").tolist()
+        if anchor is not None:
+            customdata = [[t, d] for t, d in zip(time_strs, subset["distance_m"].tolist())]
+        else:
+            customdata = [[t] for t in time_strs]
         windows[label] = {
             "x": subset["lon"].tolist(),
             "y": subset["lat"].tolist(),
-            "customdata": subset["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S UTC").tolist(),
+            "customdata": customdata,
         }
+
+    latest_info = {
+        "lon": float(latest["lon"]),
+        "lat": float(latest["lat"]),
+        "name": f"Latest buoy position ({format_anchor_position(latest['lat'], latest['lon'])})",
+        "time_label": latest["timestamp"].strftime("%Y-%m-%d %H:%M:%S UTC"),
+    }
+    if anchor is not None:
+        latest_info["distance_m"] = latest_distance_m
 
     return {
         "windows": windows,
-        "latest": {
-            "lon": float(latest["lon"]),
-            "lat": float(latest["lat"]),
-            "name": f"Latest buoy position ({format_anchor_position(latest['lat'], latest['lon'])})",
-            "time_label": latest["timestamp"].strftime("%Y-%m-%d %H:%M:%S UTC"),
-        },
+        "latest": latest_info,
         # ISO timestamp of the newest data point (not "when this page was
         # generated") - the browser converts it to the viewer's local time.
         "latest_timestamp": latest["timestamp"].strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -953,9 +1020,10 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
             legendgroup="trajectory",
             customdata=default_window["customdata"],
             hovertemplate=(
-                "Time: %{customdata}<br>"
+                "Time: %{customdata[0]}<br>"
                 "Latitude: %{y:.6f}<br>"
-                "Longitude: %{x:.6f}<extra></extra>"
+                "Longitude: %{x:.6f}<br>"
+                + ("Excursion: %{customdata[1]:.0f} m<extra></extra>" if anchor is not None else "<extra></extra>")
             ),
         )
     )
@@ -967,11 +1035,12 @@ def render_location_section(location: dict, dataset: dict, include_plotlyjs: boo
             marker=dict(symbol="triangle-up", size=LATEST_MARKER_SIZE, color=LATEST_COLOR),
             name=latest["name"],
             legendgroup="latest",
-            customdata=[latest["time_label"]],
+            customdata=[[latest["time_label"], latest["distance_m"]] if anchor is not None else [latest["time_label"]]],
             hovertemplate=(
-                "Time: %{customdata}<br>"
+                "Time: %{customdata[0]}<br>"
                 "Latitude: %{y:.6f}<br>"
-                "Longitude: %{x:.6f}<extra></extra>"
+                "Longitude: %{x:.6f}<br>"
+                + ("Excursion: %{customdata[1]:.0f} m<extra></extra>" if anchor is not None else "<extra></extra>")
             ),
         )
     )
@@ -1249,7 +1318,7 @@ def main() -> None:
     datasets = {}
     for location in LOCATIONS:
         positions, now = fetch_positions(location)
-        dataset = build_dataset(positions, now)
+        dataset = build_dataset(positions, now, location["anchor"])
         if location.get("wave_channels"):
             dataset["waves"] = fetch_latest_waves(elements_session, location["wave_channels"])
         datasets[location["key"]] = dataset
