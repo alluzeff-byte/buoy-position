@@ -74,7 +74,7 @@ LOCATIONS = [
         "key": "pierce",
         "label": "Pierce",
         "blob_name": "Pierce_buoy_position.csv",
-        "anchor": {"lat": 57.15614, "lon": 2.26915, "radius_m": 108.0},
+        "anchor": {"lat": 57.15614, "lon": 2.26915, "radius_m": 116.0},
         "wave_channels": {
             "hs": "2bdb5270-887f-11eb-9d91-cf7c0f6efbea",
             "tp": "2baca150-887f-11eb-9d91-cf7c0f6efbea",
